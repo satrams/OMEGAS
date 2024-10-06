@@ -6,7 +6,7 @@
 # Modified from codes in Gaussian-Splatting 
 # GRAPHDECO research group, https://team.inria.fr/graphdeco
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
 from os import makedirs
 import torch
 import json
@@ -67,6 +67,12 @@ def points_inside_convex_hull(point_cloud, mask, remove_outliers=True, outlier_f
 
     # Extract the masked points from the point cloud
     masked_points = point_cloud[mask].cpu().numpy()
+
+    print(masked_points.shape)
+    
+    if (masked_points.shape[0] == 0):
+        print(point_cloud.shape)
+        return torch.zeros(point_cloud.shape[0], dtype=torch.bool).cuda()
 
     # Remove outliers if the option is selected
     if remove_outliers:
@@ -242,11 +248,16 @@ def extract(dataset : ModelParams, iteration : int,  opt : OptimizationParams, o
         classifier.cuda()
         classifier.load_state_dict(torch.load(os.path.join(dataset.model_path,"point_cloud","iteration_"+str(iteration),"classifier.pth")))
 
-        obj_id = torch.tensor(obj_id).cuda()
+        print(obj_id)
+        obj_id = torch.tensor(obj_id).int().cuda()
+
+        print(removal_thresh)
     
         logits3d = classifier(gaussians._objects.permute(2,0,1))
         prob_obj3d = torch.softmax(logits3d, dim=0)
+        print(obj_id.type())
         mask = prob_obj3d[obj_id, :, :] > removal_thresh
+        mask = mask.squeeze()
         mask3d = mask.any(dim=0).squeeze()
 
         mask3d_convex = points_inside_convex_hull(gaussians._xyz.detach(), mask3d,outlier_factor=1.0)
@@ -254,6 +265,8 @@ def extract(dataset : ModelParams, iteration : int,  opt : OptimizationParams, o
         mask3d = mask3d.float()[:,None,None]
         
     gaussians.extract_setup(opt, mask3d)
+    print(obj_id)
+    print(obj_id[0])
     point_cloud_path = os.path.join(dataset.model_path, "object_{}/point_cloud/iteration_{}".format(int(obj_id[0]),iteration))
     gaussians.save_ply(os.path.join(point_cloud_path, "point_cloud.ply"))
     
@@ -293,6 +306,9 @@ if __name__ == "__main__":
     args.select_obj_id = config.get("select_obj_id")
     args.prompt = config.get("prompt")
     args.grounding_thresh = config.get("grounding_thresh")
+    print("ahhhhhhhhhhhhhhhhhhhh")
+    print(args.grounding_thresh)
+    print(args.select_obj_id)
 
     
     # Initialize system state (RNG)

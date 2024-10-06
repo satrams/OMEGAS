@@ -32,6 +32,9 @@ python demo/demo_automatic.py \
   --chunk_size 4 \
   --img_path "$img_path" \
   --amp \
+  --SAM_NUM_POINTS_PER_BATCH 1 \
+  --chunk_size 1 \
+  --SAM_NUM_POINTS_PER_SIDE 32 \
   --temporal_setting semionline \
   --size 480 \
   --output "./example/output_gaussian_dataset/${dataset_name}" \
@@ -46,10 +49,12 @@ python demo/demo_automatic.py \
   --chunk_size 4 \
   --img_path "$img_path" \
   --amp \
+  --SAM_NUM_POINTS_PER_BATCH 1 \
+  --chunk_size 1 \
+  --SAM_NUM_POINTS_PER_SIDE 32 \
   --temporal_setting semionline \
   --size 480 \
   --output "./example/output_gaussian_dataset/${dataset_name}" \
-  --use_short_id  \
   --suppress_small_objects  \
   --SAM_PRED_IOU_THRESHOLD 0.7 \
   

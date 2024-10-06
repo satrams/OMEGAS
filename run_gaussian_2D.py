@@ -198,6 +198,7 @@ def train(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_
             # Object Loss
             gt_obj = viewpoint_cam.objects.cuda().long()
             logits = classifier(objects)
+            gt_obj = gt_obj[:, :, 0]
             loss_obj = cls_criterion(logits.unsqueeze(0), gt_obj.unsqueeze(0)).squeeze().mean()
             loss_obj = loss_obj / torch.log(torch.tensor(num_classes))  # normalize to (0,1)
             # Ll1obj = l1_loss(objects, gt_obj)
