@@ -29,29 +29,38 @@ fi
 
 # colored mask for visualization check
 python demo/demo_automatic.py \
-  --chunk_size 4 \
+  --chunk_size 1 \
   --img_path "$img_path" \
   --amp \
+  --SAM_NUM_POINTS_PER_BATCH 1 \
+  --chunk_size 1 \
+  --SAM_NUM_POINTS_PER_SIDE 32 \
   --temporal_setting semionline \
   --size 480 \
   --output "./example/output_gaussian_dataset/${dataset_name}" \
   --suppress_small_objects  \
   --SAM_PRED_IOU_THRESHOLD 0.7 \
+  --SAM_NUM_POINTS_PER_BATCH 1 \
+  --SAM_NUM_POINTS_PER_SIDE 32
 
 
 mv ./example/output_gaussian_dataset/${dataset_name}/Annotations ./example/output_gaussian_dataset/${dataset_name}/Annotations_color
 
 # gray mask for training
 python demo/demo_automatic.py \
-  --chunk_size 4 \
+  --chunk_size 1 \
   --img_path "$img_path" \
   --amp \
+  --SAM_NUM_POINTS_PER_BATCH 1 \
+  --chunk_size 1 \
+  --SAM_NUM_POINTS_PER_SIDE 32 \
   --temporal_setting semionline \
   --size 480 \
   --output "./example/output_gaussian_dataset/${dataset_name}" \
-  --use_short_id  \
   --suppress_small_objects  \
   --SAM_PRED_IOU_THRESHOLD 0.7 \
+  --SAM_NUM_POINTS_PER_BATCH 1 \
+  --SAM_NUM_POINTS_PER_SIDE 32
   
 # 2. copy gray mask to the correponding data path
 cp -r ./example/output_gaussian_dataset/${dataset_name}/Annotations ../data/${dataset_name}/object_mask

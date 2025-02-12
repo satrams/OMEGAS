@@ -22,8 +22,10 @@ from pytorch3d.structures.meshes import Meshes
 from pytorch3d.renderer.blending import BlendParams
 import open3d as o3d
 from extract_object import visualize_gt
-from dreamgaussian.cam_utils import convert_camera_from_orbit_to_pytorch3d
+# from dreamgaussian.cam_utils import convert_camera_from_orbit_to_pytorch3d
 from gaussian_splatting.utils.graphics_utils import focal2fov, fov2focal, getWorld2View2, getProjectionMatrix
+from gaussian_splatting.scene_2D import GaussianModel
+from gaussian_splatting.gaussian_renderer_2D import render, network_gui
 
 # from dreamgaussian.grid_put import mipmap_linear_grid_put_2d
 # from dreamgaussian.mesh import Mesh, safe_normalize
@@ -117,7 +119,7 @@ class GUI:
         self.gui = opt.gui # enable gui
         self.W = opt._W
         self.H = opt._H
-        self.cam = OrbitCamera(opt.W, opt.H, r=opt.radius, fovy=opt.fovy, fovx = opt.fovx)
+        self.cam = OrbitCamera(opt.W, opt.H, r=opt.radius, fovy=opt.fovy, far=1000)
 
         self.mode = "image"
         self.seed = "random"
@@ -365,6 +367,7 @@ class GUI:
                 pose = orbit_camera(self.opt.elevation + ver, hor, radius, target= self.target)
                 poses.append(pose)
 
+                print(pose)
                 cur_cam = MiniCam(pose, render_resolution, render_resolution, self.cam.fovy, self.cam.fovx, self.cam.near, self.cam.far)
 
                 bg_color = torch.tensor([1, 1, 1] if np.random.rand() > self.opt.invert_bg_prob else [0, 0, 0], dtype=torch.float32, device="cuda")
@@ -519,22 +522,26 @@ class GUI:
         print("New data added to cameras.json successfully.")
     
     def random_render_mask(self):
-        self.renderer.gaussians.training_setup(self.opt)
+
+        gaussians = GaussianModel(self.opt.sh_degree)
+        gaussians.training_setup(self.opt)
+
+        # self.renderer.gaussians.training_setup(self.opt)
         # do not do progressive sh-level
-        self.renderer.gaussians.active_sh_degree = self.renderer.gaussians.max_sh_degree
-        self.optimizer = self.renderer.gaussians.optimizer
+        gaussians.active_sh_degree = gaussians.max_sh_degree
+        self.optimizer = gaussians.optimizer
         
         
         num_classes = 256
         print("Num classes: ",num_classes)
 
-        classifier = torch.nn.Conv2d(self.renderer.gaussians.num_objects, num_classes, kernel_size=1)
+        classifier = torch.nn.Conv2d(gaussians.num_objects, num_classes, kernel_size=1)
         classifier.cuda()
         classifier.load_state_dict(torch.load(os.path.join(self.opt.load,"point_cloud","iteration_"+str(self.opt.iteration),"classifier.pth")))
 
-        self.target = torch.mean(self.renderer.gaussians._xyz, dim=0).detach().cpu().numpy()
+        self.target = torch.mean(gaussians._xyz, dim=0).detach().cpu().numpy()
         
-        variance = torch.var(self.renderer.gaussians._xyz, unbiased=True).detach().cpu().numpy()
+        variance = torch.var(gaussians._xyz, unbiased=True).detach().cpu().numpy()
         self.radius_c = np.sqrt(variance)
         
         print("target:", self.target)
@@ -675,13 +682,13 @@ class GUI:
         
             cam_list.append(gs_camera)
             
-        if self.render_mesh:
-            p3d_cam = convert_camera_from_orbit_to_pytorch3d(cam_list[-random_n:])
+        # if self.render_mesh:
+        #     p3d_cam = convert_camera_from_orbit_to_pytorch3d(cam_list[-random_n:])
         for cam_id in range(random_n): 
             # print(cam_id)
             cur_cam = MiniCam(poses[cam_id], render_W, render_H, self.cam.fovy, self.cam.fovx, self.cam.near, self.cam.far)
             bg_color = torch.tensor([0, 0, 0], dtype=torch.float32, device="cuda")
-            out = self.renderer.render(cur_cam, bg_color=bg_color)
+            out = render(cur_cam, gaussians, bg_color=bg_color)
             if not self.render_mesh:  
                 image = out["image"].unsqueeze(0) # [1, 3, H, W] in [0, 1]
                 torchvision.utils.save_image(image, os.path.join(random_render_gs_path, "random_"+str(cam_id) + ".jpg"))
@@ -713,7 +720,7 @@ class GUI:
             rendering_obj = out["render_object"]
             logits = classifier(rendering_obj)
             pred_obj = torch.argmax(logits,dim=0)
-            gt_rgb_mask = visualize_gt(pred_obj.cpu().numpy().astype(np.uint8), target_obj)
+            gt_rgb_mask = visualize_gt(pred_obj.cpu().numpy().astype(np.uint8), [target_obj])
             
             gray_image = cv2.cvtColor(gt_rgb_mask, cv2.COLOR_RGB2GRAY)
             gray_image = (gray_image * 255).astype(np.uint8)
@@ -884,5 +891,5 @@ if __name__ == "__main__":
 
     gui = GUI(opt)
 
-    # gui.train(opt.iters)
+    gui.train(opt.iters)
     gui.random_render_mask()

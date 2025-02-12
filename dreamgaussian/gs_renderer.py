@@ -157,6 +157,7 @@ class GaussianModel:
         self.optimizer = None
         self.percent_dense = 0
         self.spatial_lr_scale = 0
+        self.num_objects = 8
         self.setup_functions()
 
     def capture(self):

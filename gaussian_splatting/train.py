@@ -10,7 +10,6 @@
 #
 
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 import torch
 from random import randint
 from utils.loss_utils import l1_loss, ssim

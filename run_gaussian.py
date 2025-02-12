@@ -174,6 +174,9 @@ def train(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_
         if opt.obj_loss:       
             objects = render_pkg["render_object"]
             # Object Loss
+            if (viewpoint_cam.objects is None):
+                print('uhhhh')
+                continue
             gt_obj = viewpoint_cam.objects.cuda().long()
             logits = classifier(objects)
             loss_obj = cls_criterion(logits.unsqueeze(0), gt_obj.unsqueeze(0)).squeeze().mean()

@@ -74,7 +74,7 @@ class PipelineParams(ParamGroup):
         self.compute_cov3D_python = False
         self.depth_ratio = 0.0
         self.debug = False
-        # self.render_depth = False
+        self.render_depth = False
         super().__init__(parser, "Pipeline Parameters")
 
 class OptimizationParams(ParamGroup):
@@ -100,7 +100,7 @@ class OptimizationParams(ParamGroup):
         self.densify_until_iter = 15_000
         self.densify_grad_threshold = 0.0002
         self.random_background = False
-        # self.obj_loss = True
+        self.obj_loss = True
         self.depth_loss = False
         self.reg3d_interval = 2
         self.reg3d_k = 5

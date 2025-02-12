@@ -7,18 +7,18 @@
 # GRAPHDECO research group, https://team.inria.fr/graphdeco
 
 import torch
-from gaussian_splatting.scene import Scene
+from gaussian_splatting.scene_2D import Scene
 import os
 # os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 # os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 from tqdm import tqdm
 from os import makedirs
-from gaussian_splatting.gaussian_renderer import render
+from gaussian_splatting.gaussian_renderer_2D import render
 import torchvision
 from gaussian_splatting.utils.general_utils import safe_state
 from argparse import ArgumentParser
 from gaussian_splatting.arguments import ModelParams, PipelineParams, get_combined_args
-from gaussian_splatting.gaussian_renderer import GaussianModel
+from gaussian_splatting.gaussian_renderer_2D import GaussianModel
 import numpy as np
 from PIL import Image
 import colorsys

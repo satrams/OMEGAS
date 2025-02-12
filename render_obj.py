@@ -13,7 +13,7 @@ from gaussian_splatting.scene_2D import Scene
 from gaussian_splatting.gaussian_renderer_2D import render,GaussianModel
 
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 # os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 from tqdm import tqdm
 from os import makedirs

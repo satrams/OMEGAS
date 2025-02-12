@@ -10,7 +10,7 @@
 #
 import numpy as np
 import torch
-from gaussian_splatting.scene_2D.cameras import Camera
+from gaussian_splatting.scene.cameras import Camera
 from gaussian_splatting.utils.general_utils import PILtoTorch
 from gaussian_splatting.utils.graphics_utils import fov2focal
 
@@ -49,11 +49,11 @@ def loadCam(args, id, cam_info, resolution_scale):
         gt_image = resized_image_rgb
     else:
         resized_image_rgb = PILtoTorch(cam_info.image, resolution)
-        # loaded_mask = None
-        if cam_info.alpha_mask is not None:
-            loaded_mask = PILtoTorch(cam_info.alpha_mask, resolution)
-        else:
-            loaded_mask = None
+        loaded_mask = None
+        # if cam_info.alpha_mask is not None:
+        #     loaded_mask = PILtoTorch(cam_info.alpha_mask, resolution)
+        # else:
+        #     loaded_mask = None
         gt_image = resized_image_rgb
         
     

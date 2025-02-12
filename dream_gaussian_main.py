@@ -13,12 +13,107 @@ import torch
 import torch.nn.functional as F
 import json
 import rembg
+from PIL import Image
+from gs_extract import visualize_gt
+
 
 from dreamgaussian.cam_utils import orbit_camera, OrbitCamera, save_camera
 from dreamgaussian.gs_renderer import Renderer, MiniCam
 
 # from dreamgaussian.grid_put import mipmap_linear_grid_put_2d
 # from dreamgaussian.mesh import Mesh, safe_normalize
+
+from pytorch3d.renderer import (AmbientLights, MeshRenderer, MeshRasterizer, RasterizationSettings,SoftPhongShader,TexturesVertex)
+from pytorch3d.structures.meshes import Meshes
+from pytorch3d.renderer.blending import BlendParams
+import open3d as o3d
+from gaussian_splatting.utils.graphics_utils import focal2fov, fov2focal, getWorld2View2, getProjectionMatrix
+
+from dreamgaussian.gs_obj_renderer import ObjRenderer
+
+class GSCamera(torch.nn.Module):
+    """Class to store Gaussian Splatting camera parameters.
+    """
+    def __init__(self, colmap_id, R, T, FoVx, FoVy, image, gt_alpha_mask,
+                 image_name, uid,
+                 trans=np.array([0.0, 0.0, 0.0]), scale=1.0, data_device = "cuda",
+                 image_height=None, image_width=None,
+                 ):
+        """
+        Args:
+            colmap_id (int): ID of the camera in the COLMAP reconstruction.
+            R (np.array): Rotation matrix.
+            T (np.array): Translation vector.
+            FoVx (float): Field of view in the x direction.
+            FoVy (float): Field of view in the y direction.
+            image (np.array): GT image.
+            gt_alpha_mask (_type_): _description_
+            image_name (_type_): _description_
+            uid (_type_): _description_
+            trans (_type_, optional): _description_. Defaults to np.array([0.0, 0.0, 0.0]).
+            scale (float, optional): _description_. Defaults to 1.0.
+            data_device (str, optional): _description_. Defaults to "cuda".
+            image_height (_type_, optional): _description_. Defaults to None.
+            image_width (_type_, optional): _description_. Defaults to None.
+
+        Raises:
+            ValueError: _description_
+        """
+        super(GSCamera, self).__init__()
+
+        self.uid = uid
+        self.colmap_id = colmap_id
+        self.R = R
+        self.T = T
+        self.FoVx = FoVx
+        self.FoVy = FoVy
+        self.image_name = image_name
+
+        try:
+            self.data_device = torch.device(data_device)
+        except Exception as e:
+            print(e)
+            print(f"[Warning] Custom device {data_device} failed, fallback to default cuda device" )
+            self.data_device = torch.device("cuda")
+
+        if image is None:
+            if image_height is None or image_width is None:
+                raise ValueError("Either image or image_height and image_width must be specified")
+            else:
+                self.image_height = image_height
+                self.image_width = image_width
+        else:        
+            self.original_image = image.clamp(0.0, 1.0).to(self.data_device)
+            self.image_width = self.original_image.shape[2]
+            self.image_height = self.original_image.shape[1]
+
+            if gt_alpha_mask is not None:
+                self.original_image *= gt_alpha_mask.to(self.data_device)
+            else:
+                self.original_image *= torch.ones((1, self.image_height, self.image_width), device=self.data_device)
+
+        self.zfar = 100.0
+        self.znear = 0.01
+
+        self.trans = trans
+        self.scale = scale
+
+        self.world_view_transform = torch.tensor(getWorld2View2(R, T, trans, scale)).transpose(0, 1).cuda()
+        self.projection_matrix = getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy).transpose(0,1).cuda()
+        self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
+        self.camera_center = self.world_view_transform.inverse()[3, :3]
+        
+    @property
+    def device(self):
+        return self.world_view_transform.device
+    
+    def to(self, device):
+        self.world_view_transform = self.world_view_transform.to(device)
+        self.projection_matrix = self.projection_matrix.to(device)
+        self.full_proj_transform = self.full_proj_transform.to(device)
+        self.camera_center = self.camera_center.to(device)
+        return self
+
 
 class GUI:
     def __init__(self, opt):
@@ -66,6 +161,7 @@ class GUI:
         self.optimizer = None
         self.step = 0
         self.train_steps = 1  # steps per rendering loop
+        self.render_mesh = self.opt.render_mesh
         
         # load input data from cmdline
         if self.opt.input is not None:
@@ -77,7 +173,13 @@ class GUI:
 
         # override if provide a checkpoint
         if self.opt.load is not None:
-            self.renderer.initialize(os.path.join(self.opt.load,"point_cloud","iteration_7000","point_cloud.ply"))            
+            self.renderer.initialize(os.path.join(self.opt.load,"point_cloud","iteration_15000","point_cloud.ply"))            
+            self.render_path = os.path.join(self.opt.load, "refined", "random")
+            self.sd_path = os.path.join(self.opt.load, "refined", "sd")
+            self.mask_path = os.path.join(self.opt.load, "refined", "mask")
+            makedirs(self.render_path, exist_ok=True)
+            makedirs(self.sd_path, exist_ok=True)
+            makedirs(self.mask_path, exist_ok=True)
         else:
             # initialize gaussians to a blob
             self.renderer.initialize(num_pts=self.opt.num_pts)
@@ -267,7 +369,7 @@ class GUI:
                         poses.append(pose_i)
 
                         cur_cam_i = MiniCam(pose_i, render_resolution, render_resolution, self.cam.fovy, self.cam.fovx, self.cam.near, self.cam.far)
-
+                        
                         # bg_color = torch.tensor([0.5, 0.5, 0.5], dtype=torch.float32, device="cuda")
                         out_i = self.renderer.render(cur_cam_i, bg_color=bg_color)
 
@@ -500,6 +602,262 @@ class GUI:
         #     with open(file_prompt, "r") as f:
         #         self.prompt = f.read().strip()
 
+    def random_render_mask(self):
+
+        self.renderer = ObjRenderer(sh_degree=self.opt.sh_degree)
+        
+        # override if provide a checkpoint
+        if self.opt.load is not None:
+            self.renderer.initialize(os.path.join(self.opt.load,"point_cloud","iteration_15000","point_cloud.ply"))            
+        else:
+            # initialize gaussians to a blob
+            self.renderer.initialize(num_pts=self.opt.num_pts)
+
+        self.renderer.gaussians.training_setup(self.opt)
+        # do not do progressive sh-level
+        self.renderer.gaussians.active_sh_degree = self.renderer.gaussians.max_sh_degree
+        self.optimizer = self.renderer.gaussians.optimizer
+        
+        
+        num_classes = 256
+        print("Num classes: ",num_classes)
+
+        classifier = torch.nn.Conv2d(self.renderer.gaussians.num_objects, num_classes, kernel_size=1)
+        classifier.cuda()
+        classifier.load_state_dict(torch.load(os.path.join(self.opt.load,"point_cloud","iteration_"+str(self.opt.iteration),"classifier.pth")))
+
+        self.target = torch.mean(self.renderer.gaussians._xyz, dim=0).detach().cpu().numpy()
+        
+        variance = torch.var(self.renderer.gaussians._xyz, unbiased=True).detach().cpu().numpy()
+        self.radius_c = np.sqrt(variance)
+        
+        print("target:", self.target)
+        
+        # self.radius = float(self.radius_c)+self.opt.radius
+        self.radius = float(self.radius_c)+self.opt.radius
+        print("radius:", self.radius)
+        
+        
+        print(f"[INFO] loading SD...")
+        from dreamgaussian.guidance.sd_utils import StableDiffusion
+        self.guidance_sd = StableDiffusion(self.device, hf_key= self.opt.sd)
+        # self.guidance_sd = StableDiffusion(self.device)
+        print(f"[INFO] loaded SD!")
+        
+        # starter = torch.cuda.Event(enable_timing=True)
+        # ender = torch.cuda.Event(enable_timing=True)
+        # starter.record()
+        
+        render_W = self.opt.W
+        
+        render_H = self.opt.H
+        print(render_W,render_H)
+        
+        target_obj = self.opt.select_obj_id
+        random_render_mesh_path = os.path.join(self.opt.load, "refined", "render_mesh")
+        random_render_gs_path = os.path.join(self.opt.load, "refined", "render_gs")
+        random_obj_path = os.path.join(self.opt.load, "refined", "render_obj")
+        random_inpainting_path = os.path.join(self.opt.load, "refined", "images")
+        makedirs(random_render_mesh_path, exist_ok=True)
+        makedirs(random_render_gs_path, exist_ok=True)
+        makedirs(random_obj_path, exist_ok=True)
+        makedirs(random_inpainting_path, exist_ok=True)
+        poses = []
+        vers, hors, radii = [], [], []
+        pon, ron = [], []
+        
+        radius = self.radius
+        random_n = self.opt.random_n
+        # random_n = 20
+        
+        radii.append(radius)
+        min_ver = self.opt.min_ver
+        max_ver = self.opt.max_ver
+        print("random render:",random_n)
+        
+        if self.render_mesh:
+        
+            faces_per_pixel = 1
+            max_faces_per_bin = 5000_000
+
+            mesh_raster_settings = RasterizationSettings(
+                image_size=(render_H, render_W),
+                blur_radius=0.0, 
+                faces_per_pixel=faces_per_pixel,
+                max_faces_per_bin=max_faces_per_bin,
+                max_faces_opengl= 10000,
+            )
+            lights = AmbientLights(device=self.device)
+            
+        
+        
+        for cam_id in range(random_n):
+            ver = np.random.randint(min_ver, max_ver)
+            hor = np.random.randint(-180, 180)
+            vers.append(ver)
+            hors.append(hor)
+            pose = orbit_camera(ver, hor, radius, target= self.target, opengl=False)
+            poses.append(pose)
+            po, ro = save_camera(ver, hor, radius = radius, target= self.target, opengl=False)
+            pon.append(po)
+            ron.append(ro)
+            
+            
+        
+        with open(os.path.join(self.opt.load, "cameras.json"), "r") as f:
+            cameras_data = json.load(f)
+            if "ramdom" in cameras_data[-1]["img_name"]:
+                new_data = cameras_data[:-random_n]
+            else:
+                new_data = cameras_data
+            l = len(new_data)
+
+            
+            for cam_id in range(random_n):
+                # po, ro = save_camera(vers[cam_id], hors[cam_id], radius = radius, target= self.target, opengl=False)
+                cam = {"id": cam_id +l,
+                    "img_name": "random_"+str(cam_id),
+                    "width": cameras_data[0]["width"],
+                    "height": new_data[0]["height"],
+                    "position": pon[cam_id].tolist(),
+                    "rotation": ron[cam_id].tolist(),
+                    "fy": cameras_data[0]["fy"],
+                    "fx": cameras_data[0]["fx"]
+                }
+                new_data.append(cam)
+
+            # Save the updated data back to cameras.json
+        with open(os.path.join(self.opt.load, "refined", "cameras.json"), "w") as file:
+            json.dump(new_data, file)
+
+        print("New data added to cameras.json successfully.")
+        
+        with open(os.path.join(self.opt.load,  "refined", "cameras.json"), "r") as f:
+            unsorted_camera_transforms = json.load(f)
+        camera_transforms = sorted(unsorted_camera_transforms.copy(), key = lambda x : x['id'])
+        cam_list = []
+        for cam_idx in range(len(camera_transforms)):
+            camera_transform = camera_transforms[cam_idx]
+            
+            # Extrinsics
+            rot = np.array(camera_transform['rotation'])
+            pos = np.array(camera_transform['position'])
+            
+            W2C = np.zeros((4,4))
+            W2C[:3, :3] = rot
+            W2C[:3, 3] = pos
+            W2C[3,3] = 1
+            
+            Rt = np.linalg.inv(W2C)
+            T = Rt[:3, 3]
+            R = Rt[:3, :3].transpose()
+            
+            # Intrinsics
+            width = camera_transform['width']
+            height = camera_transform['height']
+            fy = camera_transform['fy']
+            fx = camera_transform['fx']
+            fov_y = focal2fov(fy, height)
+            fov_x = focal2fov(fx, width)
+            id = camera_transform['id']
+            name = camera_transform['img_name']
+            gs_camera = GSCamera(
+                colmap_id=id, image=None, gt_alpha_mask=None,
+                R=R, T=T, FoVx=fov_x, FoVy=fov_y,
+                image_name=name, uid=id,
+                image_height=height, image_width=width,)
+        
+            cam_list.append(gs_camera)
+            
+        # if self.render_mesh:
+        #     p3d_cam = convert_camera_from_orbit_to_pytorch3d(cam_list[-random_n:])
+        for cam_id in range(random_n): 
+            # print(cam_id)
+            cur_cam = MiniCam(poses[cam_id], render_W, render_H, self.cam.fovy, self.cam.fovx, self.cam.near, self.cam.far)
+            bg_color = torch.tensor([0, 0, 0], dtype=torch.float32, device="cuda")
+            out = self.renderer.render(cur_cam, bg_color=bg_color)
+            if not self.render_mesh:  
+                image = out["image"].unsqueeze(0) # [1, 3, H, W] in [0, 1]
+                torchvision.utils.save_image(image, os.path.join(random_render_gs_path, "random_"+str(cam_id) + ".jpg"))
+            else:
+                rasterizer = MeshRasterizer(
+                    cameras=p3d_cam[cam_id], 
+                    raster_settings=mesh_raster_settings,
+                )
+                renderer = MeshRenderer(
+                    rasterizer=rasterizer,
+                    shader=SoftPhongShader(
+                        device=self.device, 
+                        cameras=p3d_cam[cam_id],
+                        lights=lights,
+                        blend_params=BlendParams(background_color=(0.0, 0.0, 0.0)),
+                        # blend_params=BlendParams(background_color=(1.0, 1.0, 1.0)),
+                    )
+                )
+                # print(image.shape)
+                img  = renderer(self.mesh, cameras=p3d_cam[cam_id])
+                # print(img.shape)
+                image = img.permute(0, 3, 1, 2)[:,:3,:,:]
+                image_gs = out["image"].unsqueeze(0)
+                torchvision.utils.save_image(image_gs, os.path.join(random_render_gs_path, "random_"+str(cam_id) + ".jpg"))
+                torchvision.utils.save_image(image, os.path.join(random_render_mesh_path, "random_"+str(cam_id) + ".jpg"))
+            
+            
+            
+            rendering_obj = out["render_object"]
+            print("ahhhhh")
+            print(rendering_obj)
+            logits = classifier(rendering_obj)
+            pred_obj = torch.argmax(logits,dim=0)
+            gt_rgb_mask = visualize_gt(pred_obj.cpu().numpy().astype(np.uint8), [target_obj])
+            
+            print(gt_rgb_mask)
+            print("Helloooooo")
+            print(np.nonzero(gt_rgb_mask))
+
+            gray_image = cv2.cvtColor(gt_rgb_mask, cv2.COLOR_RGB2GRAY)
+            gray_image = (gray_image * 255).astype(np.uint8)
+            kernel = np.ones((5, 5), np.uint8)
+            eroded_image = cv2.erode(gray_image, kernel, iterations=2)
+
+            eroded_image = eroded_image.astype(np.float32) / 255.0
+            eroded_image_color = cv2.cvtColor(eroded_image, cv2.COLOR_GRAY2RGB)
+            
+            
+            gt_rgb_mask = eroded_image_color
+            
+            
+            
+            gt_mask = gt_rgb_mask
+            # print(save_gt_mask.shape)
+            save_gt_mask = Image.fromarray(gt_mask*255)
+            gt_mask = (gt_mask).astype(np.uint8)
+            save_gt_mask.save(os.path.join(random_obj_path, "random_"+str(cam_id) + ".jpg"))
+
+            threshold = self.opt.threshold
+            mask = self.guidance_sd.sd_mask(image, prompt = [self.prompt], render_H=render_H, render_W=render_W, th = threshold)
+            # me_mask = cv2.medianBlur(mask, 5)
+            # smoothed_mask = cv2.GaussianBlur(mask, (5, 5), 0)
+            # smoothed_mask = cv2.dilate(mask, kernel, iterations=3)
+            opened_mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)  # 开运算去除小点
+            closed_mask = cv2.morphologyEx(opened_mask, cv2.MORPH_CLOSE, kernel)
+            
+            mask_t = (np.stack((closed_mask,) * 3, axis=-1)* gt_mask).astype(np.uint8)*255
+
+            
+            mask_t = np.minimum(np.stack((mask*255,) * 3, axis=-1), gt_mask)
+            mask_t = (np.stack((mask,) * 3, axis=-1)* gt_mask).astype(np.uint8)*255
+
+            pil_images = Image.fromarray(mask_t)
+            pil_images.save(os.path.join(self.mask_path, "random_"+str(cam_id) + ".jpg"))
+
+            print("Inpainting: ",cam_id+1,"/",random_n)
+            prompt = self.prompt
+
+            refined_image = self.guidance_sd.inpaint(prompt, image.to('cpu'), pil_images)
+            resized_image = refined_image.resize((render_W, render_H),Image.BILINEAR)
+            resized_image.save(os.path.join(random_inpainting_path, "random_"+str(cam_id) + ".jpg"))
+
     
     # no gui mode
     def train(self, iters=500):
@@ -509,7 +867,7 @@ class GUI:
                 self.train_step()
             # do a last prune
             # self.renderer.gaussians.prune(min_opacity=0.01, extent=1, max_screen_size=1)
-            path = os.path.join(self.opt.load,"refined_sdssde","point_cloud","iteration_7000", 'point_cloud.ply')
+            path = os.path.join(self.opt.load,"refined_sdssde","point_cloud","iteration_15000", 'point_cloud.ply')
             self.renderer.gaussians.save_ply(path)
         
         self.random_render()
@@ -531,3 +889,4 @@ if __name__ == "__main__":
     gui = GUI(opt)
 
     gui.train(opt.iters)
+    gui.random_render_mask()

@@ -25,7 +25,7 @@ import cv2
 from os import makedirs
 
 import torchvision
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 from gaussian_splatting.utils.general_utils import safe_state
 from argparse import ArgumentParser
 from gaussian_splatting.arguments import ModelParams, PipelineParams, OptimizationParams, get_combined_args

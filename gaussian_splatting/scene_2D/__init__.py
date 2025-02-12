@@ -16,7 +16,7 @@ from gaussian_splatting.utils.system_utils import searchForMaxIteration
 from gaussian_splatting.scene_2D.dataset_readers import sceneLoadTypeCallbacks
 from gaussian_splatting.scene_2D.gaussian_model import GaussianModel
 from gaussian_splatting.arguments import ModelParams
-from gaussian_splatting.utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
+from gaussian_splatting.utils.camera_utils_2D import cameraList_from_camInfos, camera_to_JSON
 
 # from utils.system_utils import searchForMaxIteration
 # from scene_2D.dataset_readers import sceneLoadTypeCallbacks
@@ -50,6 +50,7 @@ class Scene:
             print("Found cameras.json file!")
             scene_info = sceneLoadTypeCallbacks["Cameras"](args.source_path, args.white_background, args.eval)
         elif os.path.exists(os.path.join(args.source_path, "sparse")):
+            print("COLMAP TIME!")
             scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval, args.object_path, args.depth_path, train_split = args.train_split)
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
             print("Found transforms_train.json file, assuming Blender data set!")
@@ -79,6 +80,7 @@ class Scene:
 
         for resolution_scale in resolution_scales:
             print("Loading Training Cameras")
+            # print(scene_info.train_cameras)
             self.train_cameras[resolution_scale] = cameraList_from_camInfos(scene_info.train_cameras, resolution_scale, args)
             print("Loading Test Cameras")
             self.test_cameras[resolution_scale] = cameraList_from_camInfos(scene_info.test_cameras, resolution_scale, args)

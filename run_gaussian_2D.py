@@ -17,6 +17,7 @@ from gaussian_splatting.utils.image_utils import psnr, render_net_image
 from argparse import ArgumentParser, Namespace
 from gaussian_splatting.arguments import ModelParams, PipelineParams, OptimizationParams
 from gaussian_splatting.utils.general_utils import colormap
+from gaussian_splatting.utils.camera_utils_2D import Camera
 
 torch.cuda.set_device(0)
 # np.random.seed(0)
@@ -180,6 +181,10 @@ def train(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_
 
         bg = torch.rand((3), device="cuda") if opt.random_background else background
 
+
+        if (iteration % 500 == 0): 
+            torch.cuda.empty_cache()
+
         render_pkg = render(viewpoint_cam, gaussians, pipe, bg)
         
         image = render_pkg["render"]
@@ -196,8 +201,10 @@ def train(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_
         if obj_loss:       
             objects = render_pkg["render_object"]
             # Object Loss
+            viewpoint_cam : Camera = viewpoint_cam
             gt_obj = viewpoint_cam.objects.cuda().long()
             logits = classifier(objects)
+            gt_obj = gt_obj[:, :, 0]
             loss_obj = cls_criterion(logits.unsqueeze(0), gt_obj.unsqueeze(0)).squeeze().mean()
             loss_obj = loss_obj / torch.log(torch.tensor(num_classes))  # normalize to (0,1)
             # Ll1obj = l1_loss(objects, gt_obj)
@@ -324,8 +331,8 @@ if __name__ == '__main__':
     parser.add_argument('--port', type=int, default=6009)
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
-    parser.add_argument("--test_iterations", nargs="+", type=int, default=[7_000, 15_000,30000])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[7_000, 15_000,30000])
+    parser.add_argument("--test_iterations", nargs="+", type=int, default=[7_000, 15_000, 30000])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[7_000, 15_000, 30000])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--load_checkpoint", type=str, default = None)

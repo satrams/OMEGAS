@@ -30,6 +30,8 @@ add_library(CudaRasterizer
 	cuda_rasterizer/rasterizer.h
 )
 
+find_package(glm REQUIRED)
+
 set_target_properties(CudaRasterizer PROPERTIES CUDA_ARCHITECTURES "70;75;86")
 
 target_include_directories(CudaRasterizer PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/cuda_rasterizer)

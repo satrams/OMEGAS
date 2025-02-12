@@ -6,7 +6,11 @@
 # Modified from codes in Gaussian-Splatting 
 # GRAPHDECO research group, https://team.inria.fr/graphdeco
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+<<<<<<< Updated upstream
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
+=======
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+>>>>>>> Stashed changes
 from os import makedirs
 import torch
 import json
@@ -22,9 +26,9 @@ from gaussian_splatting.arguments import ModelParams, PipelineParams, Optimizati
 # from gaussian_splatting.scene.gaussian_model import GaussianModel
 # from gaussian_splatting.gaussian_renderer import render
 # from gaussian_splatting.scene import Scene
-from gaussian_splatting.scene_2D import Scene
-from gaussian_splatting.scene_2D.gaussian_model import GaussianModel
-from gaussian_splatting.gaussian_renderer_2D import render
+from gaussian_splatting.scene import Scene
+from gaussian_splatting.scene.gaussian_model import GaussianModel
+from gaussian_splatting.gaussian_renderer import render
 
 
 
@@ -67,6 +71,12 @@ def points_inside_convex_hull(point_cloud, mask, remove_outliers=True, outlier_f
 
     # Extract the masked points from the point cloud
     masked_points = point_cloud[mask].cpu().numpy()
+
+    print(masked_points.shape)
+    
+    if (masked_points.shape[0] == 0):
+        print(point_cloud.shape)
+        return torch.zeros(point_cloud.shape[0], dtype=torch.bool).cuda()
 
     # Remove outliers if the option is selected
     if remove_outliers:
@@ -134,6 +144,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         obj_gt = gt * gt_mask
         torchvision.utils.save_image(rendering, os.path.join(render_path, view.image_name + ".jpg"))
         torchvision.utils.save_image(obj_gt, os.path.join(gts_path, view.image_name + ".jpg"))
+        torchvision.utils.save_image(gt, os.path.join(render_path, view.image_name + '_original_debug.jpg'))
 
     out_path = os.path.join(render_path[:-8],'concat')
     makedirs(out_path,exist_ok=True)
@@ -242,18 +253,32 @@ def extract(dataset : ModelParams, iteration : int,  opt : OptimizationParams, o
         classifier.cuda()
         classifier.load_state_dict(torch.load(os.path.join(dataset.model_path,"point_cloud","iteration_"+str(iteration),"classifier.pth")))
 
-        obj_id = torch.tensor(obj_id).cuda()
+<<<<<<< Updated upstream
+        print(obj_id)
+        obj_id = torch.tensor(obj_id).int().cuda()
+
+        print(removal_thresh)
+=======
+        obj_id = torch.tensor(obj_id)[0]
+
+        print("haha yippeeee")
+        print(obj_id)
+>>>>>>> Stashed changes
     
         logits3d = classifier(gaussians._objects.permute(2,0,1))
         prob_obj3d = torch.softmax(logits3d, dim=0)
+        print(obj_id.type())
         mask = prob_obj3d[obj_id, :, :] > removal_thresh
+        mask = mask.squeeze()
         mask3d = mask.any(dim=0).squeeze()
-
+    
         mask3d_convex = points_inside_convex_hull(gaussians._xyz.detach(), mask3d,outlier_factor=1.0)
         mask3d = torch.logical_or(mask3d,mask3d_convex)
         mask3d = mask3d.float()[:,None,None]
         
     gaussians.extract_setup(opt, mask3d)
+    print(obj_id)
+    print(obj_id[0])
     point_cloud_path = os.path.join(dataset.model_path, "object_{}/point_cloud/iteration_{}".format(int(obj_id[0]),iteration))
     gaussians.save_ply(os.path.join(point_cloud_path, "point_cloud.ply"))
     
@@ -293,6 +318,9 @@ if __name__ == "__main__":
     args.select_obj_id = config.get("select_obj_id")
     args.prompt = config.get("prompt")
     args.grounding_thresh = config.get("grounding_thresh")
+    print("ahhhhhhhhhhhhhhhhhhhh")
+    print(args.grounding_thresh)
+    print(args.select_obj_id)
 
     
     # Initialize system state (RNG)
@@ -301,7 +329,11 @@ if __name__ == "__main__":
         extract(model.extract(args), args.iteration, opt.extract(args), args.select_obj_id, args.removal_thresh)
         id = args.select_obj_id
     else:
-        id = choose_id(model.extract(args), args.iteration, opt.extract(args), args.prompt, args.grounding_thresh)
+        id = choose_id(model.extract(args), args.iteration, opt.extract(args), args.prompt, args.grounding_thresh, 28)
         extract(model.extract(args), args.iteration, opt.extract(args), id, args.removal_thresh)
-        
+
+    print('yooooooo')
+    print(id)
+    id : list[torch.Tensor] = id[0]
+    id[0] = id[0].cpu()
     render_sets(model.extract(args), args.iteration, pipeline.extract(args), args.skip_train, args.skip_test, id)
